@@ -66,16 +66,24 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
         let name = v.ident.to_string().to_snake_case();
         {
             let name_of_is = Ident::new(&format!("is_{}", name), v.ident.span());
+            let docs_of_is = format!(
+                "Returns `true` if `self` is of variant [`{variant}`].\n\n\
+
+                [`{variant}`]: #variant.{variant}",
+                variant = v.ident,
+            );
 
             items.extend(
                 Quote::new_call_site()
                     .quote_with(smart_quote!(
                         Vars {
+                            docs_of_is,
                             name_of_is,
                             Variant: &v.ident
                         },
                         {
                             impl Type {
+                                #[doc = docs_of_is]
                                 #[inline]
                                 pub fn name_of_is(&self) -> bool {
                                     match *self {
@@ -94,6 +102,24 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
         {
             let name_of_expect = Ident::new(&format!("expect_{}", name), v.ident.span());
             let name_of_take = Ident::new(&name, v.ident.span());
+
+            let docs_of_expect = format!(
+                "Unwraps the value, yielding the content of [`{variant}`].\n\n\
+
+                # Panics\n\n\
+
+                Panics if the value is not [`{variant}`], with a panic message including \
+                the content of `self`.\n\n\
+
+                [`{variant}`]: #variant.{variant}",
+                variant = v.ident,
+            );
+            let docs_of_take = format!(
+                "Returns `Some` if `self` is of variant [`{variant}`], and `None` otherwise.\n\n\
+
+                [`{variant}`]: #variant.{variant}",
+                variant = v.ident,
+            );
 
             match &v.fields {
                 Fields::Unnamed(fields) => {
@@ -130,6 +156,8 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                         Quote::new_call_site()
                             .quote_with(smart_quote!(
                                 Vars {
+                                    docs_of_expect,
+                                    docs_of_take,
                                     name_of_expect,
                                     name_of_take,
                                     Variant: &v.ident,
@@ -137,6 +165,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                                 },
                                 {
                                     impl Type {
+                                        #[doc = docs_of_expect]
                                         #[inline]
                                         pub fn name_of_expect(self) -> Type
                                         where
@@ -148,6 +177,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                                             }
                                         }
 
+                                        #[doc = docs_of_take]
                                         #[inline]
                                         pub fn name_of_take(self) -> Option<Type> {
                                             match self {

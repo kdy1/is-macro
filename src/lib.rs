@@ -7,8 +7,8 @@ use quote::quote;
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned;
 use syn::{
-    parse, Data, DataEnum, DeriveInput, Field, Fields, Generics, Ident, ImplItem, ItemImpl, Path,
-    Token, Type, TypePath, TypeTuple, WhereClause,
+    parse, Data, DataEnum, DeriveInput, Field, Fields, Generics, Ident, ImplItem, ItemImpl, Lit,
+    Meta, MetaNameValue, NestedMeta, Path, Token, Type, TypePath, TypeTuple, WhereClause,
 };
 
 /// A proc macro to generate methods like is_varaiant / expect_variant.
@@ -29,9 +29,25 @@ use syn::{
 /// // Rust's type inference cannot handle this.
 /// assert!(Enum::<()>::A.is_a());
 ///
+/// assert_eq!(Enum::B(String::from("foo")).b(), Some(String::from("foo")));
+///
 /// assert_eq!(Enum::B(String::from("foo")).expect_b(), String::from("foo"));
 /// ```
-#[proc_macro_derive(Is)]
+///
+/// # Renaming
+///
+/// ```rust
+///
+/// use is_macro::Is;
+/// #[derive(Debug, Is)]
+/// pub enum Enum {
+///     #[is(name = "video_mp4")]
+///     VideoMp4,
+/// }
+///
+/// assert!(Enum::VideoMp4.is_video_mp4());
+/// ```
+#[proc_macro_derive(Is, attributes(is))]
 pub fn is(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input: DeriveInput = syn::parse(input).expect("failed to parse derive input");
     let generics: Generics = input.generics.clone();
@@ -60,11 +76,82 @@ pub fn is(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     .into()
 }
 
+#[derive(Debug)]
+struct Input {
+    name: String,
+}
+
 fn expand(input: DataEnum) -> Vec<ImplItem> {
     let mut items = vec![];
 
     for v in &input.variants {
-        let name = v.ident.to_string().to_snake_case();
+        let attrs = v
+            .attrs
+            .iter()
+            .filter(|attr| attr.path.is_ident("is"))
+            .collect::<Vec<_>>();
+        if attrs.len() > 2 {
+            panic!("derive(Is) expects no attribute or one attribute")
+        }
+        let i = match attrs.into_iter().next() {
+            None => Input {
+                name: {
+                    println!("Using default: {}", v.ident.to_string().to_snake_case());
+                    v.ident.to_string().to_snake_case()
+                    //
+                },
+            },
+            Some(attr) => {
+                //
+                let meta = attr
+                    .parse_meta()
+                    .unwrap_or_else(|err| panic!("failed to parse is({:?}): {}", attr.tokens, err));
+
+                let mut input = Input {
+                    name: Default::default(),
+                };
+
+                let mut apply = |v: MetaNameValue| {
+                    assert!(
+                        v.path.is_ident("name"),
+                        "Currently, is() only supports `is(name = 'foo')`"
+                    );
+
+                    input.name = match v.lit {
+                        Lit::Str(s) => s.value(),
+                        _ => unimplemented!(
+                            "is(): name must be a string li teral but {:?} is provided",
+                            v.lit
+                        ),
+                    };
+                };
+
+                match meta {
+                    Meta::NameValue(v) => {
+                        //
+                        apply(v)
+                    }
+                    Meta::List(l) => {
+                        // Handle is(name = "foo")
+                        for meta in l.nested {
+                            match meta {
+                                NestedMeta::Lit(l) => {
+                                    unimplemented!("is($literal) where $literal = {:?}", l)
+                                }
+                                NestedMeta::Meta(Meta::NameValue(v)) => apply(v),
+
+                                _ => unimplemented!("is({})", meta.dump()),
+                            }
+                        }
+                    }
+                    _ => unimplemented!("is({:?})", meta),
+                }
+
+                input
+            }
+        };
+
+        let name = &*i.name;
         {
             let name_of_is = Ident::new(&format!("is_{}", name), v.ident.span());
             let docs_of_is = format!(

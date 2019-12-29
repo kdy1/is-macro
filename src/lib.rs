@@ -4,10 +4,11 @@ use inflector::Inflector;
 use pmutil::{smart_quote, Quote, ToTokensExt};
 use proc_macro2::Span;
 use quote::quote;
-use syn::punctuated::Pair;
+use syn::punctuated::{Pair, Punctuated};
+use syn::spanned::Spanned;
 use syn::{
     parse, Data, DataEnum, DeriveInput, Field, Fields, Generics, Ident, ImplItem, ItemImpl, Path,
-    Type, TypePath, TypeTuple, WhereClause,
+    Token, Type, TypePath, TypeTuple, WhereClause,
 };
 
 /// A proc macro to generate methods like is_varaiant / expect_variant.
@@ -150,6 +151,23 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                         })
                     };
 
+                    let fields: Punctuated<Ident, Token![,]> = fields
+                        .unnamed
+                        .clone()
+                        .into_pairs()
+                        .enumerate()
+                        .map(|(i, pair)| {
+                            let handle = |f: Field| {
+                                //
+                                Ident::new(&format!("v{}", i), f.span())
+                            };
+                            match pair {
+                                Pair::Punctuated(v, p) => Pair::Punctuated(handle(v), p),
+                                Pair::End(v) => Pair::End(handle(v)),
+                            }
+                        })
+                        .collect();
+
                     items.extend(
                         Quote::new_call_site()
                             .quote_with(smart_quote!(
@@ -160,6 +178,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                                     name_of_take,
                                     Variant: &v.ident,
                                     Type: ty,
+                                    v: &fields,
                                 },
                                 {
                                     impl Type {
@@ -170,7 +189,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                                             Self: ::std::fmt::Debug,
                                         {
                                             match self {
-                                                Self::Variant(v) => v,
+                                                Self::Variant(v) => (v),
                                                 _ => panic!("called expect on {:?}", self),
                                             }
                                         }
@@ -179,7 +198,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                                         #[inline]
                                         pub fn name_of_take(self) -> Option<Type> {
                                             match self {
-                                                Self::Variant(v) => Some(v),
+                                                Self::Variant(v) => Some((v)),
                                                 _ => None,
                                             }
                                         }

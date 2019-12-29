@@ -126,11 +126,9 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                     let ty = if fields.unnamed.len() == 1 {
                         let mut ty = fields.unnamed.iter();
                         let name = ty.next().expect("names len is 1").ty.clone();
-                        Type::Path(
-                            Quote::new_call_site()
-                                .quote_with(smart_quote!(Vars { name }, { name }))
-                                .parse(),
-                        )
+                        Quote::new_call_site()
+                            .quote_with(smart_quote!(Vars { name }, { name }))
+                            .parse()
                     } else {
                         Type::Tuple(TypeTuple {
                             paren_token: Default::default(),

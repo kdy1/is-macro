@@ -96,7 +96,6 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
         let i = match attrs.into_iter().next() {
             None => Input {
                 name: {
-                    println!("Using default: {}", v.ident.to_string().to_snake_case());
                     v.ident.to_string().to_snake_case()
                     //
                 },

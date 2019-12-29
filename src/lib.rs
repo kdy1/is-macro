@@ -384,7 +384,6 @@ impl ItemImplExt for ItemImpl {
             Some(WhereClause {
                 ref mut predicates, ..
             }) => {
-                println!("FOO");
                 predicates.extend(
                     generics
                         .where_clause

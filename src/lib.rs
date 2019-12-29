@@ -90,7 +90,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
             .iter()
             .filter(|attr| attr.path.is_ident("is"))
             .collect::<Vec<_>>();
-        if attrs.len() > 2 {
+        if attrs.len() >= 2 {
             panic!("derive(Is) expects no attribute or one attribute")
         }
         let i = match attrs.into_iter().next() {

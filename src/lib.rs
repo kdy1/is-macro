@@ -237,7 +237,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                         })
                     };
 
-                    let fields: Punctuated<Ident, Token![,]> = fields
+                    let mut fields: Punctuated<Ident, Token![,]> = fields
                         .unnamed
                         .clone()
                         .into_pairs()
@@ -253,6 +253,17 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                             }
                         })
                         .collect();
+
+                    // Make sure that we don't have any trailing punctuation
+                    // This ensure that if we have a single unnamed field,
+                    // we will produce a value of the form `(v)`,
+                    // not a single-element tuple `(v,)`
+                    if let Some(mut pair) = fields.pop() {
+                        if let Pair::Punctuated(v, _) = pair {
+                            pair = Pair::End(v);
+                        }
+                        fields.extend(std::iter::once(pair));
+                    }
 
                     items.extend(
                         Quote::new_call_site()

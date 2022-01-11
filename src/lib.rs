@@ -4,11 +4,13 @@ use inflector::Inflector;
 use pmutil::{smart_quote, Quote, ToTokensExt};
 use proc_macro2::Span;
 use quote::quote;
+use syn::fold::Fold;
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned;
 use syn::{
     parse, Data, DataEnum, DeriveInput, Field, Fields, Generics, Ident, ImplItem, ItemImpl, Lit,
-    Meta, MetaNameValue, NestedMeta, Path, Token, Type, TypePath, TypeTuple, WhereClause,
+    Meta, MetaNameValue, NestedMeta, Path, Token, Type, TypePath, TypeReference, TypeTuple,
+    WhereClause,
 };
 
 /// A proc macro to generate methods like is_variant / expect_variant.
@@ -155,7 +157,6 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
             let name_of_is = Ident::new(&format!("is_{}", name), v.ident.span());
             let docs_of_is = format!(
                 "Returns `true` if `self` is of variant [`{variant}`].\n\n\
-
                 [`{variant}`]: #variant.{variant}",
                 variant = v.ident,
             );
@@ -187,23 +188,25 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
         }
 
         {
+            let name_of_cast = Ident::new(&format!("as_{}", name), v.ident.span());
             let name_of_expect = Ident::new(&format!("expect_{}", name), v.ident.span());
             let name_of_take = Ident::new(&name, v.ident.span());
 
+            let docs_of_cast = format!(
+                "Returns `Some` if `self` is a reference of variant [`{variant}`], and `None` otherwise.\n\n\
+                [`{variant}`]: #variant.{variant}",
+                variant = v.ident,
+            );
             let docs_of_expect = format!(
                 "Unwraps the value, yielding the content of [`{variant}`].\n\n\
-
                 # Panics\n\n\
-
                 Panics if the value is not [`{variant}`], with a panic message including \
                 the content of `self`.\n\n\
-
                 [`{variant}`]: #variant.{variant}",
                 variant = v.ident,
             );
             let docs_of_take = format!(
                 "Returns `Some` if `self` is of variant [`{variant}`], and `None` otherwise.\n\n\
-
                 [`{variant}`]: #variant.{variant}",
                 variant = v.ident,
             );
@@ -237,6 +240,8 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                         })
                     };
 
+                    let cast_ty = AddRef.fold_type(ty.clone());
+
                     let mut fields: Punctuated<Ident, Token![,]> = fields
                         .unnamed
                         .clone()
@@ -269,16 +274,28 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                         Quote::new_call_site()
                             .quote_with(smart_quote!(
                                 Vars {
+                                    docs_of_cast,
                                     docs_of_expect,
                                     docs_of_take,
+                                    name_of_cast,
                                     name_of_expect,
                                     name_of_take,
                                     Variant: &v.ident,
-                                    Type: ty,
+                                    Type: &ty,
+                                    CastType: &cast_ty,
                                     v: &fields,
                                 },
                                 {
                                     impl Type {
+                                        #[doc = docs_of_cast]
+                                        #[inline]
+                                        pub fn name_of_cast(&self) -> Option<CastType> {
+                                            match self {
+                                                Self::Variant(v) => Some((v)),
+                                                _ => None,
+                                            }
+                                        }
+
                                         #[doc = docs_of_expect]
                                         #[inline]
                                         pub fn name_of_expect(self) -> Type
@@ -312,6 +329,22 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
     }
 
     items
+}
+
+struct AddRef;
+
+impl Fold for AddRef {
+    fn fold_type(&mut self, ty: Type) -> Type {
+        match ty {
+            Type::Path(..) => Type::Reference(TypeReference {
+                and_token: Default::default(),
+                lifetime: None,
+                mutability: None,
+                elem: Box::new(ty),
+            }),
+            _ => syn::fold::fold_type(self, ty),
+        }
+    }
 }
 
 /// Extension trait for `ItemImpl` (impl block).

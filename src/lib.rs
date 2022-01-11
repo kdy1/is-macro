@@ -11,7 +11,7 @@ use syn::{
     Meta, MetaNameValue, NestedMeta, Path, Token, Type, TypePath, TypeTuple, WhereClause,
 };
 
-/// A proc macro to generate methods like is_varaiant / expect_variant.
+/// A proc macro to generate methods like is_variant / expect_variant.
 ///
 ///
 /// # Example
@@ -394,14 +394,12 @@ impl ItemImplExt for ItemImpl {
         match self.generics.where_clause {
             Some(WhereClause {
                 ref mut predicates, ..
-            }) => {
-                predicates.extend(
-                    generics
-                        .where_clause
-                        .into_iter()
-                        .flat_map(|wc| wc.predicates.into_pairs()),
-                )
-            }
+            }) => predicates.extend(
+                generics
+                    .where_clause
+                    .into_iter()
+                    .flat_map(|wc| wc.predicates.into_pairs()),
+            ),
             ref mut opt @ None => *opt = generics.where_clause,
         }
 

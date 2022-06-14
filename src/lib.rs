@@ -4,7 +4,6 @@ use inflector::Inflector;
 use pmutil::{smart_quote, Quote, ToTokensExt};
 use proc_macro2::Span;
 use quote::quote;
-use syn::fold::Fold;
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned;
 use syn::{
@@ -189,11 +188,17 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
 
         {
             let name_of_cast = Ident::new(&format!("as_{}", name), v.ident.span());
+            let name_of_cast_mut = Ident::new(&format!("as_mut_{}", name), v.ident.span());
             let name_of_expect = Ident::new(&format!("expect_{}", name), v.ident.span());
             let name_of_take = Ident::new(&name, v.ident.span());
 
             let docs_of_cast = format!(
                 "Returns `Some` if `self` is a reference of variant [`{variant}`], and `None` otherwise.\n\n\
+                [`{variant}`]: #variant.{variant}",
+                variant = v.ident,
+            );
+            let docs_of_cast_mut = format!(
+                "Returns `Some` if `self` is a mutable reference of variant [`{variant}`], and `None` otherwise.\n\n\
                 [`{variant}`]: #variant.{variant}",
                 variant = v.ident,
             );
@@ -213,34 +218,10 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
 
             match &v.fields {
                 Fields::Unnamed(fields) => {
-                    let ty = if fields.unnamed.len() == 1 {
-                        let mut ty = fields.unnamed.iter();
-                        let name = ty.next().expect("names len is 1").ty.clone();
-                        Quote::new_call_site()
-                            .quote_with(smart_quote!(Vars { name }, { name }))
-                            .parse()
-                    } else {
-                        Type::Tuple(TypeTuple {
-                            paren_token: Default::default(),
-                            elems: fields
-                                .unnamed
-                                .clone()
-                                .into_pairs()
-                                .map(|pair| {
-                                    let handle = |f: Field| {
-                                        //
-                                        f.ty
-                                    };
-                                    match pair {
-                                        Pair::Punctuated(v, p) => Pair::Punctuated(handle(v), p),
-                                        Pair::End(v) => Pair::End(handle(v)),
-                                    }
-                                })
-                                .collect(),
-                        })
-                    };
-
-                    let cast_ty = AddRef.fold_type(ty.clone());
+                    let types = fields.unnamed.iter().map(|f| f.ty.clone());
+                    let cast_ty = types_to_type(types.clone().map(|ty| add_ref(false, ty)));
+                    let cast_ty_mut = types_to_type(types.clone().map(|ty| add_ref(true, ty)));
+                    let ty = types_to_type(types);
 
                     let mut fields: Punctuated<Ident, Token![,]> = fields
                         .unnamed
@@ -275,14 +256,17 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                             .quote_with(smart_quote!(
                                 Vars {
                                     docs_of_cast,
+                                    docs_of_cast_mut,
                                     docs_of_expect,
                                     docs_of_take,
                                     name_of_cast,
+                                    name_of_cast_mut,
                                     name_of_expect,
                                     name_of_take,
                                     Variant: &v.ident,
                                     Type: &ty,
                                     CastType: &cast_ty,
+                                    CastTypeMut: &cast_ty_mut,
                                     v: &fields,
                                 },
                                 {
@@ -290,6 +274,15 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                                         #[doc = docs_of_cast]
                                         #[inline]
                                         pub fn name_of_cast(&self) -> Option<CastType> {
+                                            match self {
+                                                Self::Variant(v) => Some((v)),
+                                                _ => None,
+                                            }
+                                        }
+
+                                        #[doc = docs_of_cast_mut]
+                                        #[inline]
+                                        pub fn name_of_cast_mut(&mut self) -> Option<CastTypeMut> {
                                             match self {
                                                 Self::Variant(v) => Some((v)),
                                                 _ => None,
@@ -331,20 +324,30 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
     items
 }
 
-struct AddRef;
-
-impl Fold for AddRef {
-    fn fold_type(&mut self, ty: Type) -> Type {
-        match ty {
-            Type::Path(..) => Type::Reference(TypeReference {
-                and_token: Default::default(),
-                lifetime: None,
-                mutability: None,
-                elem: Box::new(ty),
-            }),
-            _ => syn::fold::fold_type(self, ty),
+fn types_to_type(types: impl Iterator<Item = Type>) -> Type {
+    let mut types: Punctuated<_, _> = types.collect();
+    if types.len() == 1 {
+        types.pop().expect("len is 1").into_value()
+    } else {
+        TypeTuple {
+            paren_token: Default::default(),
+            elems: types,
         }
+        .into()
     }
+}
+
+fn add_ref(mutable: bool, ty: Type) -> Type {
+    Type::Reference(TypeReference {
+        and_token: Default::default(),
+        lifetime: None,
+        mutability: if mutable {
+            Some(Default::default())
+        } else {
+            None
+        },
+        elem: Box::new(ty),
+    })
 }
 
 /// Extension trait for `ItemImpl` (impl block).

@@ -4,4 +4,5 @@ use is_macro::Is;
 pub enum Enum {
     A,
     B(&'static str),
+    C(&'static mut u32),
 }

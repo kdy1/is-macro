@@ -5,4 +5,5 @@ pub enum Enum {
     A(),
     B(usize, usize),
     C(String),
+    D(&'static str, &'static mut u32),
 }

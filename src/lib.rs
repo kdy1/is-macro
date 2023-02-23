@@ -172,7 +172,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                             impl Type {
                                 #[doc = docs_of_is]
                                 #[inline]
-                                pub fn name_of_is(&self) -> bool {
+                                pub const fn name_of_is(&self) -> bool {
                                     match *self {
                                         Self::Variant { .. } => true,
                                         _ => false,

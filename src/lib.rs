@@ -4,12 +4,13 @@ use inflector::Inflector;
 use pmutil::{smart_quote, Quote, ToTokensExt};
 use proc_macro2::Span;
 use quote::quote;
+use syn::parse::Parse;
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned;
 use syn::{
-    parse, Data, DataEnum, DeriveInput, Field, Fields, Generics, Ident, ImplItem, ItemImpl, Lit,
-    Meta, MetaNameValue, NestedMeta, Path, Token, Type, TypePath, TypeReference, TypeTuple,
-    WhereClause,
+    parse, parse2, Data, DataEnum, DeriveInput, Expr, ExprLit, Field, Fields, Generics, Ident,
+    ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Path, Token, Type, TypePath, TypeReference,
+    TypeTuple, WhereClause,
 };
 
 /// A proc macro to generate methods like is_variant / expect_variant.
@@ -82,6 +83,22 @@ struct Input {
     name: String,
 }
 
+impl Parse for Input {
+    fn parse(input: parse::ParseStream) -> syn::Result<Self> {
+        let _: Ident = input.parse()?;
+        let _: Token![=] = input.parse()?;
+
+        let name = input.parse::<ExprLit>()?;
+
+        Ok(Input {
+            name: match name.lit {
+                Lit::Str(s) => s.value(),
+                _ => panic!("is(name = ...) expects a string literal"),
+            },
+        })
+    }
+}
+
 fn expand(input: DataEnum) -> Vec<ImplItem> {
     let mut items = vec![];
 
@@ -89,7 +106,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
         let attrs = v
             .attrs
             .iter()
-            .filter(|attr| attr.path.is_ident("is"))
+            .filter(|attr| attr.path().is_ident("is"))
             .collect::<Vec<_>>();
         if attrs.len() >= 2 {
             panic!("derive(Is) expects no attribute or one attribute")
@@ -103,48 +120,38 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
             },
             Some(attr) => {
                 //
-                let meta = attr
-                    .parse_meta()
-                    .unwrap_or_else(|err| panic!("failed to parse is({:?}): {}", attr.tokens, err));
 
                 let mut input = Input {
                     name: Default::default(),
                 };
 
-                let mut apply = |v: MetaNameValue| {
+                let mut apply = |v: &MetaNameValue| {
                     assert!(
                         v.path.is_ident("name"),
                         "Currently, is() only supports `is(name = 'foo')`"
                     );
 
-                    input.name = match v.lit {
-                        Lit::Str(s) => s.value(),
+                    input.name = match &v.value {
+                        Expr::Lit(ExprLit {
+                            lit: Lit::Str(s), ..
+                        }) => s.value(),
                         _ => unimplemented!(
-                            "is(): name must be a string li teral but {:?} is provided",
-                            v.lit
+                            "is(): name must be a string literal but {:?} is provided",
+                            v.value
                         ),
                     };
                 };
 
-                match meta {
+                match &attr.meta {
                     Meta::NameValue(v) => {
                         //
                         apply(v)
                     }
                     Meta::List(l) => {
                         // Handle is(name = "foo")
-                        for meta in l.nested {
-                            match meta {
-                                NestedMeta::Lit(l) => {
-                                    unimplemented!("is($literal) where $literal = {:?}", l)
-                                }
-                                NestedMeta::Meta(Meta::NameValue(v)) => apply(v),
-
-                                _ => unimplemented!("is({})", meta.dump()),
-                            }
-                        }
+                        input = parse2(l.tokens.clone()).expect("failed to parse input");
                     }
-                    _ => unimplemented!("is({:?})", meta),
+                    _ => unimplemented!("is({:?})", attr.meta),
                 }
 
                 input
@@ -153,7 +160,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
 
         let name = &*i.name;
         {
-            let name_of_is = Ident::new(&format!("is_{}", name), v.ident.span());
+            let name_of_is = Ident::new(&format!("is_{name}"), v.ident.span());
             let docs_of_is = format!(
                 "Returns `true` if `self` is of variant [`{variant}`].\n\n\
                 [`{variant}`]: #variant.{variant}",
@@ -187,10 +194,10 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
         }
 
         {
-            let name_of_cast = Ident::new(&format!("as_{}", name), v.ident.span());
-            let name_of_cast_mut = Ident::new(&format!("as_mut_{}", name), v.ident.span());
-            let name_of_expect = Ident::new(&format!("expect_{}", name), v.ident.span());
-            let name_of_take = Ident::new(&name, v.ident.span());
+            let name_of_cast = Ident::new(&format!("as_{name}"), v.ident.span());
+            let name_of_cast_mut = Ident::new(&format!("as_mut_{name}"), v.ident.span());
+            let name_of_expect = Ident::new(&format!("expect_{name}"), v.ident.span());
+            let name_of_take = Ident::new(name, v.ident.span());
 
             let docs_of_cast = format!(
                 "Returns `Some` if `self` is a reference of variant [`{variant}`], and `None` otherwise.\n\n\
@@ -216,107 +223,104 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                 variant = v.ident,
             );
 
-            match &v.fields {
-                Fields::Unnamed(fields) => {
-                    let types = fields.unnamed.iter().map(|f| f.ty.clone());
-                    let cast_ty = types_to_type(types.clone().map(|ty| add_ref(false, ty)));
-                    let cast_ty_mut = types_to_type(types.clone().map(|ty| add_ref(true, ty)));
-                    let ty = types_to_type(types);
+            if let Fields::Unnamed(fields) = &v.fields {
+                let types = fields.unnamed.iter().map(|f| f.ty.clone());
+                let cast_ty = types_to_type(types.clone().map(|ty| add_ref(false, ty)));
+                let cast_ty_mut = types_to_type(types.clone().map(|ty| add_ref(true, ty)));
+                let ty = types_to_type(types);
 
-                    let mut fields: Punctuated<Ident, Token![,]> = fields
-                        .unnamed
-                        .clone()
-                        .into_pairs()
-                        .enumerate()
-                        .map(|(i, pair)| {
-                            let handle = |f: Field| {
-                                //
-                                Ident::new(&format!("v{}", i), f.span())
-                            };
-                            match pair {
-                                Pair::Punctuated(v, p) => Pair::Punctuated(handle(v), p),
-                                Pair::End(v) => Pair::End(handle(v)),
-                            }
-                        })
-                        .collect();
-
-                    // Make sure that we don't have any trailing punctuation
-                    // This ensure that if we have a single unnamed field,
-                    // we will produce a value of the form `(v)`,
-                    // not a single-element tuple `(v,)`
-                    if let Some(mut pair) = fields.pop() {
-                        if let Pair::Punctuated(v, _) = pair {
-                            pair = Pair::End(v);
+                let mut fields: Punctuated<Ident, Token![,]> = fields
+                    .unnamed
+                    .clone()
+                    .into_pairs()
+                    .enumerate()
+                    .map(|(i, pair)| {
+                        let handle = |f: Field| {
+                            //
+                            Ident::new(&format!("v{i}"), f.span())
+                        };
+                        match pair {
+                            Pair::Punctuated(v, p) => Pair::Punctuated(handle(v), p),
+                            Pair::End(v) => Pair::End(handle(v)),
                         }
-                        fields.extend(std::iter::once(pair));
+                    })
+                    .collect();
+
+                // Make sure that we don't have any trailing punctuation
+                // This ensure that if we have a single unnamed field,
+                // we will produce a value of the form `(v)`,
+                // not a single-element tuple `(v,)`
+                if let Some(mut pair) = fields.pop() {
+                    if let Pair::Punctuated(v, _) = pair {
+                        pair = Pair::End(v);
                     }
+                    fields.extend(std::iter::once(pair));
+                }
 
-                    items.extend(
-                        Quote::new_call_site()
-                            .quote_with(smart_quote!(
-                                Vars {
-                                    docs_of_cast,
-                                    docs_of_cast_mut,
-                                    docs_of_expect,
-                                    docs_of_take,
-                                    name_of_cast,
-                                    name_of_cast_mut,
-                                    name_of_expect,
-                                    name_of_take,
-                                    Variant: &v.ident,
-                                    Type: &ty,
-                                    CastType: &cast_ty,
-                                    CastTypeMut: &cast_ty_mut,
-                                    v: &fields,
-                                },
-                                {
-                                    impl Type {
-                                        #[doc = docs_of_cast]
-                                        #[inline]
-                                        pub fn name_of_cast(&self) -> Option<CastType> {
-                                            match self {
-                                                Self::Variant(v) => Some((v)),
-                                                _ => None,
-                                            }
+                items.extend(
+                    Quote::new_call_site()
+                        .quote_with(smart_quote!(
+                            Vars {
+                                docs_of_cast,
+                                docs_of_cast_mut,
+                                docs_of_expect,
+                                docs_of_take,
+                                name_of_cast,
+                                name_of_cast_mut,
+                                name_of_expect,
+                                name_of_take,
+                                Variant: &v.ident,
+                                Type: &ty,
+                                CastType: &cast_ty,
+                                CastTypeMut: &cast_ty_mut,
+                                v: &fields,
+                            },
+                            {
+                                impl Type {
+                                    #[doc = docs_of_cast]
+                                    #[inline]
+                                    pub fn name_of_cast(&self) -> Option<CastType> {
+                                        match self {
+                                            Self::Variant(v) => Some((v)),
+                                            _ => None,
                                         }
+                                    }
 
-                                        #[doc = docs_of_cast_mut]
-                                        #[inline]
-                                        pub fn name_of_cast_mut(&mut self) -> Option<CastTypeMut> {
-                                            match self {
-                                                Self::Variant(v) => Some((v)),
-                                                _ => None,
-                                            }
+                                    #[doc = docs_of_cast_mut]
+                                    #[inline]
+                                    pub fn name_of_cast_mut(&mut self) -> Option<CastTypeMut> {
+                                        match self {
+                                            Self::Variant(v) => Some((v)),
+                                            _ => None,
                                         }
+                                    }
 
-                                        #[doc = docs_of_expect]
-                                        #[inline]
-                                        pub fn name_of_expect(self) -> Type
-                                        where
-                                            Self: ::std::fmt::Debug,
-                                        {
-                                            match self {
-                                                Self::Variant(v) => (v),
-                                                _ => panic!("called expect on {:?}", self),
-                                            }
+                                    #[doc = docs_of_expect]
+                                    #[inline]
+                                    pub fn name_of_expect(self) -> Type
+                                    where
+                                        Self: ::std::fmt::Debug,
+                                    {
+                                        match self {
+                                            Self::Variant(v) => (v),
+                                            _ => panic!("called expect on {:?}", self),
                                         }
+                                    }
 
-                                        #[doc = docs_of_take]
-                                        #[inline]
-                                        pub fn name_of_take(self) -> Option<Type> {
-                                            match self {
-                                                Self::Variant(v) => Some((v)),
-                                                _ => None,
-                                            }
+                                    #[doc = docs_of_take]
+                                    #[inline]
+                                    pub fn name_of_take(self) -> Option<Type> {
+                                        match self {
+                                            Self::Variant(v) => Some((v)),
+                                            _ => None,
                                         }
                                     }
                                 }
-                            ))
-                            .parse::<ItemImpl>()
-                            .items,
-                    );
-                }
-                _ => {}
+                            }
+                        ))
+                        .parse::<ItemImpl>()
+                        .items,
+                );
             }
         }
     }

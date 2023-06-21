@@ -7,8 +7,8 @@ use quote::quote;
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned;
 use syn::{
-    parse, Data, DataEnum, DeriveInput, Field, Fields, Generics, Ident, ImplItem, ItemImpl, Lit,
-    Meta, MetaNameValue, NestedMeta, Path, Token, Type, TypePath, TypeReference, TypeTuple,
+    parse, Data, DataEnum, DeriveInput, Expr, ExprLit, Field, Fields, Generics, Ident, ImplItem,
+    ItemImpl, Lit, Meta, MetaNameValue, Path, Token, Type, TypePath, TypeReference, TypeTuple,
     WhereClause,
 };
 
@@ -103,9 +103,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
             },
             Some(attr) => {
                 //
-                let meta = attr
-                    .parse_meta()
-                    .unwrap_or_else(|err| panic!("failed to parse is({:?}): {}", attr.tokens, err));
+                let meta = attr.meta;
 
                 let mut input = Input {
                     name: Default::default(),
@@ -117,11 +115,13 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                         "Currently, is() only supports `is(name = 'foo')`"
                     );
 
-                    input.name = match v.lit {
-                        Lit::Str(s) => s.value(),
+                    input.name = match v.value {
+                        Expr::Lit(ExprLit {
+                            lit: Lit::Str(s), ..
+                        }) => s.value(),
                         _ => unimplemented!(
-                            "is(): name must be a string li teral but {:?} is provided",
-                            v.lit
+                            "is(): name must be a string literal but {:?} is provided",
+                            v.value
                         ),
                     };
                 };

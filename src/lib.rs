@@ -4,12 +4,13 @@ use inflector::Inflector;
 use pmutil::{smart_quote, Quote, ToTokensExt};
 use proc_macro2::Span;
 use quote::quote;
+use syn::parse::Parse;
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned;
 use syn::{
-    parse, Data, DataEnum, DeriveInput, Expr, ExprLit, Field, Fields, Generics, Ident, ImplItem,
-    ItemImpl, Lit, Meta, MetaNameValue, Path, Token, Type, TypePath, TypeReference, TypeTuple,
-    WhereClause,
+    parse, parse2, parse_macro_input, Data, DataEnum, DeriveInput, Expr, ExprLit, Field, Fields,
+    Generics, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Path, Token, Type, TypePath,
+    TypeReference, TypeTuple, WhereClause,
 };
 
 /// A proc macro to generate methods like is_variant / expect_variant.
@@ -82,6 +83,22 @@ struct Input {
     name: String,
 }
 
+impl Parse for Input {
+    fn parse(input: parse::ParseStream) -> syn::Result<Self> {
+        let _: Ident = input.parse()?;
+        let _: Token![=] = input.parse()?;
+
+        let name = input.parse::<ExprLit>()?;
+
+        Ok(Input {
+            name: match name.lit {
+                Lit::Str(s) => s.value(),
+                _ => panic!("is(name = ...) expects a string literal"),
+            },
+        })
+    }
+}
+
 fn expand(input: DataEnum) -> Vec<ImplItem> {
     let mut items = vec![];
 
@@ -103,19 +120,18 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
             },
             Some(attr) => {
                 //
-                let meta = attr.meta;
 
                 let mut input = Input {
                     name: Default::default(),
                 };
 
-                let mut apply = |v: MetaNameValue| {
+                let mut apply = |v: &MetaNameValue| {
                     assert!(
                         v.path.is_ident("name"),
                         "Currently, is() only supports `is(name = 'foo')`"
                     );
 
-                    input.name = match v.value {
+                    input.name = match &v.value {
                         Expr::Lit(ExprLit {
                             lit: Lit::Str(s), ..
                         }) => s.value(),
@@ -126,25 +142,16 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                     };
                 };
 
-                match meta {
+                match &attr.meta {
                     Meta::NameValue(v) => {
                         //
                         apply(v)
                     }
                     Meta::List(l) => {
                         // Handle is(name = "foo")
-                        for meta in l.nested {
-                            match meta {
-                                Meta::Lit(l) => {
-                                    unimplemented!("is($literal) where $literal = {:?}", l)
-                                }
-                                Meta::NameValue(v) => apply(v),
-
-                                _ => unimplemented!("is({})", meta.dump()),
-                            }
-                        }
+                        input = parse2(l.tokens.clone()).expect("failed to parse input");
                     }
-                    _ => unimplemented!("is({:?})", meta),
+                    _ => unimplemented!("is({:?})", attr.meta),
                 }
 
                 input

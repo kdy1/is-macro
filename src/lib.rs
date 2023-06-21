@@ -89,7 +89,7 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
         let attrs = v
             .attrs
             .iter()
-            .filter(|attr| attr.path.is_ident("is"))
+            .filter(|attr| attr.path().is_ident("is"))
             .collect::<Vec<_>>();
         if attrs.len() >= 2 {
             panic!("derive(Is) expects no attribute or one attribute")
@@ -135,10 +135,10 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                         // Handle is(name = "foo")
                         for meta in l.nested {
                             match meta {
-                                NestedMeta::Lit(l) => {
+                                Meta::Lit(l) => {
                                     unimplemented!("is($literal) where $literal = {:?}", l)
                                 }
-                                NestedMeta::Meta(Meta::NameValue(v)) => apply(v),
+                                Meta::NameValue(v) => apply(v),
 
                                 _ => unimplemented!("is({})", meta.dump()),
                             }

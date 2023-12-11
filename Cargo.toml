@@ -1,6 +1,6 @@
 [package]
 name = "is-macro"
-description = "Easily create methods for to use yout custom enum like Option / Result"
+description = "Derive methods for using custom enums like Option / Result"
 version = "0.3.1"
 documentation = "https://docs.rs/is-macro"
 repository = "https://github.com/kdy1/is-macro"

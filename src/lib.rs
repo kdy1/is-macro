@@ -248,70 +248,52 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                     fields.extend(std::iter::once(pair));
                 }
 
-                items.extend(
-                    Quote::new_call_site()
-                        .quote_with(smart_quote!(
-                            Vars {
-                                docs_of_cast,
-                                docs_of_cast_mut,
-                                docs_of_expect,
-                                docs_of_take,
-                                name_of_cast,
-                                name_of_cast_mut,
-                                name_of_expect,
-                                name_of_take,
-                                Variant: &v.ident,
-                                Type: &ty,
-                                CastType: &cast_ty,
-                                CastTypeMut: &cast_ty_mut,
-                                v: &fields,
-                            },
-                            {
-                                impl Type {
-                                    #[doc = docs_of_cast]
-                                    #[inline]
-                                    pub fn name_of_cast(&self) -> Option<CastType> {
-                                        match self {
-                                            Self::Variant(v) => Some((v)),
-                                            _ => None,
-                                        }
-                                    }
+                let variant = &v.ident;
 
-                                    #[doc = docs_of_cast_mut]
-                                    #[inline]
-                                    pub fn name_of_cast_mut(&mut self) -> Option<CastTypeMut> {
-                                        match self {
-                                            Self::Variant(v) => Some((v)),
-                                            _ => None,
-                                        }
-                                    }
-
-                                    #[doc = docs_of_expect]
-                                    #[inline]
-                                    pub fn name_of_expect(self) -> Type
-                                    where
-                                        Self: ::std::fmt::Debug,
-                                    {
-                                        match self {
-                                            Self::Variant(v) => (v),
-                                            _ => panic!("called expect on {:?}", self),
-                                        }
-                                    }
-
-                                    #[doc = docs_of_take]
-                                    #[inline]
-                                    pub fn name_of_take(self) -> Option<Type> {
-                                        match self {
-                                            Self::Variant(v) => Some((v)),
-                                            _ => None,
-                                        }
-                                    }
-                                }
+                let item_impl: ItemImpl = parse_quote!(
+                    impl #ty {
+                        #[doc = #docs_of_cast]
+                        #[inline]
+                        pub fn #name_of_cast(&self) -> Option<#cast_ty> {
+                            match self {
+                                Self::#variant(#fields) => Some((#fields)),
+                                _ => None,
                             }
-                        ))
-                        .parse::<ItemImpl>()
-                        .items,
+                        }
+
+                        #[doc = #docs_of_cast_mut]
+                        #[inline]
+                        pub fn #name_of_cast_mut(&mut self) -> Option<#cast_ty_mut> {
+                            match self {
+                                Self::#variant(#fields) => Some((#fields)),
+                                _ => None,
+                            }
+                        }
+
+                        #[doc = #docs_of_expect]
+                        #[inline]
+                        pub fn #name_of_expect(self) -> #ty
+                        where
+                            Self: ::std::fmt::Debug,
+                        {
+                            match self {
+                                Self::#variant(#fields) => (#fields),
+                                _ => panic!("called expect on {:?}", self),
+                            }
+                        }
+
+                        #[doc = #docs_of_take]
+                        #[inline]
+                        pub fn #name_of_take(self) -> Option<#ty> {
+                            match self {
+                                Self::#variant(#fields) => Some((#fields)),
+                                _ => None,
+                            }
+                        }
+                    }
                 );
+
+                items.extend(item_impl.items);
             }
         }
     }

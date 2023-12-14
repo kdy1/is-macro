@@ -1,16 +1,15 @@
 extern crate proc_macro;
 
 use inflector::Inflector;
-use pmutil::{smart_quote, Quote, ToTokensExt};
 use proc_macro2::Span;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::parse::Parse;
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned;
 use syn::{
-    parse, parse2, Data, DataEnum, DeriveInput, Expr, ExprLit, Field, Fields, Generics, Ident,
-    ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Path, Token, Type, TypePath, TypeReference,
-    TypeTuple, WhereClause,
+    parse, parse2, parse_quote, Data, DataEnum, DeriveInput, Expr, ExprLit, Field, Fields,
+    Generics, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Path, Token, Type, TypePath,
+    TypeReference, TypeTuple, WhereClause,
 };
 
 /// A proc macro to generate methods like is_variant / expect_variant.
@@ -74,7 +73,7 @@ pub fn is(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         items,
     }
     .with_generics(generics)
-    .dump()
+    .into_token_stream()
     .into()
 }
 
@@ -167,30 +166,22 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                 variant = v.ident,
             );
 
-            items.extend(
-                Quote::new_call_site()
-                    .quote_with(smart_quote!(
-                        Vars {
-                            docs_of_is,
-                            name_of_is,
-                            Variant: &v.ident
-                        },
-                        {
-                            impl Type {
-                                #[doc = docs_of_is]
-                                #[inline]
-                                pub const fn name_of_is(&self) -> bool {
-                                    match *self {
-                                        Self::Variant { .. } => true,
-                                        _ => false,
-                                    }
-                                }
-                            }
+            let variant = &v.ident;
+
+            let item_impl: ItemImpl = parse_quote!(
+                impl Type {
+                    #[doc = #docs_of_is]
+                    #[inline]
+                    pub const fn #name_of_is(&self) -> bool {
+                        match *self {
+                            Self::#variant { .. } => true,
+                            _ => false,
                         }
-                    ))
-                    .parse::<ItemImpl>()
-                    .items,
+                    }
+                }
             );
+
+            items.extend(item_impl.items);
         }
 
         {

@@ -1,16 +1,15 @@
 extern crate proc_macro;
 
 use inflector::Inflector;
-use pmutil::{smart_quote, Quote, ToTokensExt};
 use proc_macro2::Span;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::parse::Parse;
 use syn::punctuated::{Pair, Punctuated};
 use syn::spanned::Spanned;
 use syn::{
-    parse, parse2, Data, DataEnum, DeriveInput, Expr, ExprLit, Field, Fields, Generics, Ident,
-    ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Path, Token, Type, TypePath, TypeReference,
-    TypeTuple, WhereClause,
+    parse, parse2, parse_quote, Data, DataEnum, DeriveInput, Expr, ExprLit, Field, Fields,
+    Generics, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Path, Token, Type, TypePath,
+    TypeReference, TypeTuple, WhereClause,
 };
 
 /// A proc macro to generate methods like is_variant / expect_variant.
@@ -74,7 +73,7 @@ pub fn is(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         items,
     }
     .with_generics(generics)
-    .dump()
+    .into_token_stream()
     .into()
 }
 
@@ -167,30 +166,22 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                 variant = v.ident,
             );
 
-            items.extend(
-                Quote::new_call_site()
-                    .quote_with(smart_quote!(
-                        Vars {
-                            docs_of_is,
-                            name_of_is,
-                            Variant: &v.ident
-                        },
-                        {
-                            impl Type {
-                                #[doc = docs_of_is]
-                                #[inline]
-                                pub const fn name_of_is(&self) -> bool {
-                                    match *self {
-                                        Self::Variant { .. } => true,
-                                        _ => false,
-                                    }
-                                }
-                            }
+            let variant = &v.ident;
+
+            let item_impl: ItemImpl = parse_quote!(
+                impl Type {
+                    #[doc = #docs_of_is]
+                    #[inline]
+                    pub const fn #name_of_is(&self) -> bool {
+                        match *self {
+                            Self::#variant { .. } => true,
+                            _ => false,
                         }
-                    ))
-                    .parse::<ItemImpl>()
-                    .items,
+                    }
+                }
             );
+
+            items.extend(item_impl.items);
         }
 
         {
@@ -257,70 +248,52 @@ fn expand(input: DataEnum) -> Vec<ImplItem> {
                     fields.extend(std::iter::once(pair));
                 }
 
-                items.extend(
-                    Quote::new_call_site()
-                        .quote_with(smart_quote!(
-                            Vars {
-                                docs_of_cast,
-                                docs_of_cast_mut,
-                                docs_of_expect,
-                                docs_of_take,
-                                name_of_cast,
-                                name_of_cast_mut,
-                                name_of_expect,
-                                name_of_take,
-                                Variant: &v.ident,
-                                Type: &ty,
-                                CastType: &cast_ty,
-                                CastTypeMut: &cast_ty_mut,
-                                v: &fields,
-                            },
-                            {
-                                impl Type {
-                                    #[doc = docs_of_cast]
-                                    #[inline]
-                                    pub fn name_of_cast(&self) -> Option<CastType> {
-                                        match self {
-                                            Self::Variant(v) => Some((v)),
-                                            _ => None,
-                                        }
-                                    }
+                let variant = &v.ident;
 
-                                    #[doc = docs_of_cast_mut]
-                                    #[inline]
-                                    pub fn name_of_cast_mut(&mut self) -> Option<CastTypeMut> {
-                                        match self {
-                                            Self::Variant(v) => Some((v)),
-                                            _ => None,
-                                        }
-                                    }
-
-                                    #[doc = docs_of_expect]
-                                    #[inline]
-                                    pub fn name_of_expect(self) -> Type
-                                    where
-                                        Self: ::std::fmt::Debug,
-                                    {
-                                        match self {
-                                            Self::Variant(v) => (v),
-                                            _ => panic!("called expect on {:?}", self),
-                                        }
-                                    }
-
-                                    #[doc = docs_of_take]
-                                    #[inline]
-                                    pub fn name_of_take(self) -> Option<Type> {
-                                        match self {
-                                            Self::Variant(v) => Some((v)),
-                                            _ => None,
-                                        }
-                                    }
-                                }
+                let item_impl: ItemImpl = parse_quote!(
+                    impl #ty {
+                        #[doc = #docs_of_cast]
+                        #[inline]
+                        pub fn #name_of_cast(&self) -> Option<#cast_ty> {
+                            match self {
+                                Self::#variant(#fields) => Some((#fields)),
+                                _ => None,
                             }
-                        ))
-                        .parse::<ItemImpl>()
-                        .items,
+                        }
+
+                        #[doc = #docs_of_cast_mut]
+                        #[inline]
+                        pub fn #name_of_cast_mut(&mut self) -> Option<#cast_ty_mut> {
+                            match self {
+                                Self::#variant(#fields) => Some((#fields)),
+                                _ => None,
+                            }
+                        }
+
+                        #[doc = #docs_of_expect]
+                        #[inline]
+                        pub fn #name_of_expect(self) -> #ty
+                        where
+                            Self: ::std::fmt::Debug,
+                        {
+                            match self {
+                                Self::#variant(#fields) => (#fields),
+                                _ => panic!("called expect on {:?}", self),
+                            }
+                        }
+
+                        #[doc = #docs_of_take]
+                        #[inline]
+                        pub fn #name_of_take(self) -> Option<#ty> {
+                            match self {
+                                Self::#variant(#fields) => Some((#fields)),
+                                _ => None,
+                            }
+                        }
+                    }
                 );
+
+                items.extend(item_impl.items);
             }
         }
     }
@@ -423,8 +396,8 @@ impl ItemImplExt for ItemImpl {
 
                 }
             };
-            parse(item.dump().into())
-                .unwrap_or_else(|err| panic!("with_generics failed: {}\n{}", err, item.dump()))
+            parse2(item.into_token_stream())
+                .unwrap_or_else(|err| panic!("with_generics failed: {}", err))
         };
 
         // Handle generics added by proc-macro.

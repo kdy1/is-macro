@@ -1,7 +1,7 @@
 [package]
 name = "is-macro"
 description = "Derive methods for using custom enums like Option / Result"
-version = "0.3.2"
+version = "0.3.3"
 documentation = "https://docs.rs/is-macro"
 repository = "https://github.com/kdy1/is-macro"
 authors = ["강동윤 <kdy1997.dev@gmail.com>"]
@@ -14,7 +14,6 @@ license = "MIT"
 proc-macro = true
 
 [dependencies]
-pmutil = "0.6.0"
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["fold", "full", "derive", "extra-traits", "fold"] }

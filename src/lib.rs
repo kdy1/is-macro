@@ -414,8 +414,8 @@ impl ItemImplExt for ItemImpl {
 
                 }
             };
-            parse(item.dump().into())
-                .unwrap_or_else(|err| panic!("with_generics failed: {}\n{}", err, item.dump()))
+            parse2(item.into_token_stream())
+                .unwrap_or_else(|err| panic!("with_generics failed: {}", err))
         };
 
         // Handle generics added by proc-macro.

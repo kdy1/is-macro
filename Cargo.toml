@@ -14,7 +14,6 @@ license = "MIT"
 proc-macro = true
 
 [dependencies]
-pmutil = "0.6.0"
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["fold", "full", "derive", "extra-traits", "fold"] }
